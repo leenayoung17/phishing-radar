@@ -43,3 +43,13 @@ next-env.d.ts
 
 # logs
 *.log
+
+# raw datasets (never commit; see README for sources/licenses)
+/data/
+/important/
+*.csv
+*.zip
+
+# Python cache
+__pycache__/
+*.py[cod]
