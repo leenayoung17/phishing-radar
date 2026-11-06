@@ -8,6 +8,7 @@
 //  - 같은 서버 안에서 먼저 한 번 막고(빠른 1차 제한), DB 함수 submit_report 가 최종으로 센다
 //    (같은 사용자 10분 5건, 전체 1분 30건). 사용자 구분값은 IP 를 비밀값으로 섞은 해시이며 IP 원문은 저장하지 않는다.
 import { createHmac, randomBytes, randomUUID } from "crypto";
+import { classifySupabaseError, type SupabaseErrorInfo } from "@/lib/supabase/diagnose";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -73,8 +74,12 @@ type ErrorCode =
   | "storage_unavailable"
   | "internal_error";
 
-function fail(status: number, code: ErrorCode, message: string): Response {
-  return Response.json({ ok: false, error: { code, message } }, { status, headers: HEADERS });
+/** reason 은 저장소 오류의 '종류'와 오류 코드뿐이다(키·주소·사용자 입력은 담지 않는다). 원인 파악용. */
+function fail(status: number, code: ErrorCode, message: string, reason?: SupabaseErrorInfo): Response {
+  return Response.json(
+    { ok: false, error: { code, message, ...(reason ? { reason: reason.kind, detail: reason.code, httpStatus: reason.httpStatus } : {}) } },
+    { status, headers: HEADERS },
+  );
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -136,7 +141,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const id = randomUUID();
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc("submit_report", {
+    const { data, error, status: httpStatus } = await supabase.rpc("submit_report", {
       p_id: id,
       p_report_type: type as ReportType,
       p_description: maskPersonalInfo(description),
@@ -151,11 +156,11 @@ export async function POST(request: Request): Promise<Response> {
       p_reporter_id: normalizeReporterId(body.reporterId),
     });
     if (error) {
-      // 내용이 섞일 수 있으므로 오류 내용은 로그에 남기지 않는다.
-      const notReady = ["42P01", "42883", "PGRST202", "PGRST205", "PGRST204"].includes(error.code ?? "");
-      return notReady
-        ? fail(503, "storage_not_ready", "제보 저장소가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.")
-        : fail(503, "storage_unavailable", "제보를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      // 내용이 섞일 수 있으므로 오류 내용은 로그에 남기지 않고, 종류와 코드만 응답에 담는다.
+      const info = classifySupabaseError(error, httpStatus);
+      return info.kind === "function_missing"
+        ? fail(503, "storage_not_ready", "제보 저장소가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.", info)
+        : fail(503, "storage_unavailable", "제보를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.", info);
     }
     if (data === "rate_limited") {
       return fail(429, "rate_limited", "제보를 너무 자주 보내셨습니다. 10분 뒤에 다시 시도해 주세요.");
