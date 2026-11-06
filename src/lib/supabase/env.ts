@@ -7,8 +7,19 @@ function cleanEnvValue(value: string | undefined): string {
   return (value ?? "").trim().replace(/^["']+|["']+$/g, "").trim();
 }
 
+// 주소는 'https://프로젝트.supabase.co' 까지만 쓴다.
+// 'REST 주소'(…/rest/v1/)를 복사해 넣어도 도메인 부분만 남겨, 코드가 붙이는 /rest/v1 과 겹치지 않게 한다.
+function normalizeSupabaseUrl(value: string | undefined): string {
+  const cleaned = cleanEnvValue(value);
+  try {
+    return new URL(cleaned).origin;
+  } catch {
+    return cleaned.replace(/\/+$/, "");
+  }
+}
+
 export function getSupabaseEnv() {
-  const url = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL).replace(/\/+$/, "");
+  const url = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const publishableKey = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
 
   if (!url || !publishableKey) {
