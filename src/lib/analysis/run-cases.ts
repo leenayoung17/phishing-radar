@@ -5,6 +5,7 @@
 
 import { DONE_STAGES, buildGuidance, getStageSteps } from "../guidance";
 import { buildAnalysisSummary, maskPersonalInfo, normalizeReporterId } from "../reports";
+import { classifySupabaseError } from "../supabase/diagnose";
 import { ANALYSIS_CASES } from "./cases";
 import { analyzeMessage } from "./engine";
 import { buildView } from "./normalize";
@@ -244,6 +245,14 @@ function runStructural(): void {
   // 제보자 익명 번호: UUID 형식만 받고, 이름·전화번호 같은 값은 버린다.
   check("reporter id uuid accepted", normalizeReporterId("A3F9C2D1-1234-4ABC-9DEF-0123456789AB") === "a3f9c2d1-1234-4abc-9def-0123456789ab");
   check("reporter id junk rejected", normalizeReporterId("홍길동 010-1234-5678") === null && normalizeReporterId(123) === null);
+
+  // Supabase 오류 분류(원인 파악용): 종류와 코드만 밖으로 나가야 한다.
+  check("supabase wrong key -> auth", classifySupabaseError({ message: "Invalid API key", code: "" }, 401).kind === "auth");
+  check("supabase no permission -> permission", classifySupabaseError({ message: "permission denied for table reports", code: "42501" }, 401).kind === "permission");
+  check("supabase wrong url -> network", classifySupabaseError({ message: "TypeError: fetch failed", code: "" }, 0).kind === "network");
+  check("supabase missing function -> function_missing", classifySupabaseError({ message: "x", code: "PGRST202" }, 404).kind === "function_missing");
+  const leak = JSON.stringify(classifySupabaseError({ message: "secret abc 010-1234-5678", code: "XX" }, 500));
+  check("classify output has no message text", !leak.includes("secret") && !leak.includes("010-1234"), leak);
 
   // 결정성
   const a = JSON.stringify(analyzeMessage(risky));
